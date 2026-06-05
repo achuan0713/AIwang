@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>算法渗透力评测｜你的数字双胞胎有多了解你？</title>
+    <!-- Tailwind CSS + Google Fonts + 基础动画 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Inter', 'PingFang SC', system-ui, -apple-system, sans-serif; }
+        body { background-color: #f8fafc; }
+        /* 淡入淡出动画 */
+        .fade-in {
+            animation: fadeIn 0.25s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        /* 单选/多选自定义平滑过渡 */
+        .transition-radio {
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+        input[type="radio"]:checked + label, input[type="checkbox"]:checked + label {
+            background-color: #eef2ff;
+            border-color: #1e3a8a;
+        }
+        /* 进度条过渡 */
+        .progress-bar {
+            transition: width 0.3s ease-out;
+        }
+        /* 卡片滚动舒适 */
+        .question-card {
+            transition: all 0.2s;
+        }
+        button:active {
+            transform: scale(0.97);
+        }
+    </style>
+</head>
+<body class="antialiased flex items-center justify-center min-h-screen p-4 md:p-6">
+
+    <div id="app" class="w-full max-w-2xl mx-auto">
+        <!-- 主卡片 -->
+        <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+            <!-- 进度条区域 + 标题简写 -->
+            <div class="pt-6 px-6 pb-2 border-b border-gray-100">
+                <div class="flex justify-between items-center text-xs text-gray-500 mb-1">
+                    <span id="questionCounter" class="font-medium">第 1 / 30 题</span>
+                    <span id="scorePreview" class="text-gray-400">目前得分: 0</span>
+                </div>
+                <div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                    <div id="progressFill" class="progress-bar bg-blue-800 h-2 rounded-full" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- 动态内容区 (问卷/结果页) -->
+            <div id="dynamicContent" class="p-6 md:p-8 fade-in">
+                <!-- 问卷题目会动态渲染到这里 -->
+                <div class="text-center py-12 text-gray-400">加载中...</div>
+            </div>
+
+            <!-- 底部导航按钮 -->
+            <div class="px-6 pb-6 pt-2 bg-white border-t border-gray-50 flex justify-between items-center">
+                <button id="prevBtn" class="px-5 py-2.5 rounded-xl text-gray-500 bg-gray-100 hover:bg-gray-200 transition disabled:opacity-30 disabled:cursor-not-allowed font-medium text-sm">← 上一题</button>
+                <button id="nextBtn" class="px-6 py-2.5 rounded-xl bg-blue-900 hover:bg-blue-800 text-white font-medium shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed">下一题 →</button>
+            </div>
+        </div>
+        <p class="text-center text-gray-400 text-xs mt-6">* 根据真实感受选择，算法将为你生成专属渗透力报告</p>
+    </div>
+
+    <script>
+        // ----------------------------- 完整题库数据 (基于文档30题+分支题) ---------------------------------
+        // 定义所有题目对象 id, title, type, options(数组，每个含text,score), nextDefault(默认下一题id), branchMap(根据选项值跳转)
+        // 为清晰，所有分支题目独立id: q1,q2,q3,q4_a,q4_b,q4_c,q4_d,q5,q6,q7_a,q7_bc,q8,q9,q10,q11,q12,q13,q14,q15,q16_a,q16_b,q17,q18,q19,q20,q21,q22,q23,q24,q25,q26,q27,q28,q29,q30
+        // 多选特殊类型标记: type: 'checkbox' 针对q7_bc
+        
+        const questionsMap = {
+            q1: { id: 'q1', title: '你的性别是？', type: 'radio', options: [{ text: '男', score: 0 },{ text: '女', score: 0 },{ text: '其他/不愿透露', score: 0 }], nextDefault: 'q2' },
+            q2: { id: 'q2', title: '你的年龄段是？', type: 'radio', options: [{ text: '18岁以下', score: 0 },{ text: '18-24岁', score: 0 },{ text: '25-30岁', score: 0 },{ text: '31岁及以上', score: 0 }], nextDefault: 'q3' },
+            q3: { id: 'q3', title: '你最常使用的社交媒体是？（单选）', type: 'radio', options: [
+                { text: '抖音 / 快手 (短视频流)', score: 0, nextId: 'q4_a' },
+                { text: '小红书 (图文/种草流)', score: 0, nextId: 'q4_b' },
+                { text: '微信 / 微博 (社交/广场流)', score: 0, nextId: 'q4_c' },
+                { text: 'B站 (中长视频流)', score: 0, nextId: 'q4_d' }
+            ], nextDefault: null, hasBranch: true },
+            // Q4 四个分支题
+            q4_a: { id: 'q4_a', title: '你是否经常在"推荐页"刷到你刚刚或近期搜索过的商品/话题？', type: 'radio', options: [
+                { text: '几乎每次都有，像"读心术"一样', score: 3 }, { text: '经常看到，但不是全部', score: 2 }, { text: '偶尔会看到', score: 1 }, { text: '从未注意/没有', score: 0 }
+            ], nextDefault: 'q5' },
+            q4_b: { id: 'q4_b', title: '你是否曾在没有搜索的情况下，刷到过朋友刚发的动态，或者你们共同感兴趣的小众品牌？', type: 'radio', options: [
+                { text: '是的，经常觉得它比我还了解我的朋友圈', score: 3 }, { text: '有过几次，感觉被"围观"了', score: 2 }, { text: '偶尔看到', score: 1 }, { text: '没有这种感觉', score: 0 }
+            ], nextDefault: 'q5' },
+            q4_c: { id: 'q4_c', title: '你是否觉得朋友圈广告或热搜话题，精准击中了你最近的烦恼或消费需求？', type: 'radio', options: [
+                { text: '非常精准，甚至涉及私密对话内容', score: 3 }, { text: '比较精准，符合我的兴趣', score: 2 }, { text: '一般，大多是通用广告', score: 1 }, { text: '完全不感兴趣/乱推', score: 0 }
+            ], nextDefault: 'q5' },
+            q4_d: { id: 'q4_d', title: '你是否觉得"历史记录"和"稍后再看"列表里的内容，被算法"泄露"给了推荐页？', type: 'radio', options: [
+                { text: '是的，推荐页全是我想看但还没看的', score: 3 }, { text: '有一部分重合', score: 2 }, { text: '只有少量重合', score: 1 }, { text: '完全不同', score: 0 }
+            ], nextDefault: 'q5' },
+            q5: { id: 'q5', title: '你是否相信"APP正在通过手机麦克风窃听你的对话"这一说法？', type: 'radio', options: [
+                { text: '深信不疑，因为我有过太多次"巧合"', score: 3 }, { text: '半信半疑，虽然没证据，但太像实时监听了', score: 2 }, { text: '不太相信，觉得是大数据的巧合', score: 1 }, { text: '完全不信，那是阴谋论', score: 0 }
+            ], nextDefault: 'q6' },
+            q6: { id: 'q6', title: '这种"巧合"通常发生在什么场景下？（单选）', type: 'radio', options: [
+                { text: '刚聊完某商品，打开APP就刷到（或广告）', score: 0, nextId: 'q7_a' },
+                { text: '刚聊完某人/某事，刷到相关八卦/新闻', score: 0, nextId: 'q7_bc' },
+                { text: '从未发生过这种事', score: 0, nextId: 'q7_bc' },
+                { text: '记不清了', score: 0, nextId: 'q7_bc' }
+            ], nextDefault: null, hasBranch: true },
+            // 高敏感组 Q7_A
+            q7_a: { id: 'q7_a', title: '当这种"巧合"发生时，你的第一反应是？', type: 'radio', options: [
+                { text: '立刻检查麦克风权限，感到被侵犯', score: 3 }, { text: '觉得有趣/可怕，截图发给朋友', score: 2 }, { text: '无所谓，反正我也在看', score: 1 }, { text: '怀疑是自己的错觉', score: 0 }
+            ], nextDefault: 'q8' },
+            // 多选题目 Q7_BC (针对B/C/D分支, 文档合并多选)
+            q7_bc: { id: 'q7_bc', title: '你认为这种推荐是基于什么数据？（可多选）', type: 'checkbox', options: [
+                { text: '通讯录/通话记录', score: 2 }, { text: '位置信息/常去地点', score: 1 }, { text: '浏览历史和搜索记录', score: 1 }, { text: '纯属随机/概率问题', score: 0 }
+            ], nextDefault: 'q8' },
+            q8: { id: 'q8', title: '你每天打开最常用APP的次数大约是？', type: 'radio', options: [
+                { text: '50次以上', score: 3 }, { text: '20-49次', score: 2 }, { text: '5-19次', score: 1 }, { text: '少于5次', score: 0 }
+            ], nextDefault: 'q9' },
+            q9: { id: 'q9', title: '在不使用搜索引擎时，你获取新闻/新知识的主要渠道是？', type: 'radio', options: [
+                { text: '社交媒体推荐流', score: 3 }, { text: '朋友分享的链接', score: 2 }, { text: '关注的公众号/大V', score: 1 }, { text: '传统媒体网站', score: 0 }
+            ], nextDefault: 'q10' },
+            q10: { id: 'q10', title: '你是否经常"刷手机"超过预期时间（如：只想看5分钟，结果过了1小时）？', type: 'radio', options: [
+                { text: '总是', score: 3 }, { text: '经常', score: 2 }, { text: '偶尔', score: 1 }, { text: '从不', score: 0 }
+            ], nextDefault: 'q11' },
+            q11: { id: 'q11', title: '当你看到一条不感兴趣的内容时，通常会怎么做？', type: 'radio', options: [
+                { text: '长按"不感兴趣"/"减少此类推荐"', score: 0 }, { text: '直接划走，不做任何操作', score: 1 }, { text: '点击"举报"或"屏蔽"', score: 0 }, { text: '觉得"算法应该自己学会"，不操作', score: 1 }
+            ], nextDefault: 'q12' },
+            q12: { id: 'q12', title: '你是否关注过APP的"个性化推荐"开关？', type: 'radio', options: [
+                { text: '知道在哪里关，且尝试关过', score: 1 }, { text: '知道这个功能，但没关', score: 2 }, { text: '完全不知道有这个功能', score: 3 }, { text: '觉得关了也没用', score: 2 }
+            ], nextDefault: 'q13' },
+            q13: { id: 'q13', title: '假如你平时支持"奶茶加珍珠"，当你搜索"奶茶"时，你看到的内容通常是？', type: 'radio', options: [
+                { text: '全是赞美珍珠的文章和视频', score: 3 }, { text: '有加珍珠的，也有推荐加椰果的', score: 1 }, { text: '大部分是反对加珍珠的观点', score: 0 }, { text: '根本没注意过', score: 2 }
+            ], nextDefault: 'q14' },
+            q14: { id: 'q14', title: '你是否觉得很难在推荐流里看到"反对你观点"的高质量内容？', type: 'radio', options: [
+                { text: '是的，几乎看不到，大家都在唱赞歌', score: 3 }, { text: '偶尔能看到，但会被淹没', score: 2 }, { text: '能看到，且能理性讨论', score: 1 }, { text: '从未想过这个问题', score: 2 }
+            ], nextDefault: 'q15' },
+            q15: { id: 'q15', title: '你是否觉得算法让你"发现新事物"的能力变弱了？', type: 'radio', options: [
+                { text: '是的，我被困在同质化内容里', score: 0, nextId: 'q16_a' },
+                { text: '没觉得，我看到的内容很丰富', score: 0, nextId: 'q16_b' },
+                { text: '我觉得算法帮我过滤了垃圾信息', score: 0, nextId: 'q16_b' }
+            ], nextDefault: null, hasBranch: true },
+            q16_a: { id: 'q16_a', title: '你认为是什么导致了这种"同质化"？', type: 'radio', options: [
+                { text: '算法只推热门/赚钱的内容', score: 3 }, { text: '我自己的点击习惯导致的', score: 1 }, { text: '平台故意为之', score: 2 }, { text: '不知道', score: 2 }
+            ], nextDefault: 'q17' },
+            q16_b: { id: 'q16_b', title: '你最近一次在APP上"主动搜索"一个完全陌生的领域是什么时候？', type: 'radio', options: [
+                { text: '今天/昨天', score: 0 }, { text: '上周', score: 1 }, { text: '上个月', score: 2 }, { text: '很久很久以前', score: 3 }
+            ], nextDefault: 'q17' },
+            q17: { id: 'q17', title: '在安装或使用APP时，你对权限请求（位置、通讯录、麦克风）的态度是？', type: 'radio', options: [
+                { text: '全部允许，为了方便', score: 3 }, { text: '除了存储，其他都拒绝', score: 0 }, { text: '看情况，大厂就给', score: 2 }, { text: '会仔细看说明再决定', score: 1 }
+            ], nextDefault: 'q18' },
+            q18: { id: 'q18', title: '你是否知道你的"数字画像"可能包含数千个标签？', type: 'radio', options: [
+                { text: '不知道，细思极恐', score: 2 }, { text: '知道一点，大概知道兴趣标签', score: 1 }, { text: '非常清楚，甚至看过自己的标签管理', score: 0 }, { text: '觉得那只是简单的"喜欢/不喜欢"', score: 2 }
+            ], nextDefault: 'q19' },
+            q19: { id: 'q19', title: '你是否曾在不同设备（如借室友的手机）上登录账号，发现推荐内容完全不同？', type: 'radio', options: [
+                { text: '是的，算法认的是"人"不是"手机"', score: 2 }, { text: '没注意过', score: 1 }, { text: '试过，内容是一样的', score: 0 }, { text: '从来没借过手机', score: 1 }
+            ], nextDefault: 'q20' },
+            q20: { id: 'q20', title: '你认为算法推荐的主要目的是？', type: 'radio', options: [
+                { text: '让我开心，满足我的需求', score: 1 }, { text: '让我停留更久，为了广告商赚钱', score: 2 }, { text: '帮助我学习新知识', score: 0 }, { text: '不知道', score: 1 }
+            ], nextDefault: 'q21' },
+            q21: { id: 'q21', title: '你是否尝试过"训练"算法？（例如：故意多看几眼不想看的内容）', type: 'radio', options: [
+                { text: '经常尝试，想看看算法反应', score: 1 }, { text: '试过一次，没用', score: 2 }, { text: '从来没想过要对抗算法', score: 3 }, { text: '觉得没必要，内容都差不多', score: 2 }
+            ], nextDefault: 'q22' },
+            q22: { id: 'q22', title: '你是否使用过"无痕模式"或"隐私空间"浏览内容？', type: 'radio', options: [
+                { text: '经常使用，不想被记录', score: 1 }, { text: '偶尔使用', score: 2 }, { text: '从未使用', score: 3 }, { text: '不知道有这个功能', score: 3 }
+            ], nextDefault: 'q23' },
+            q23: { id: 'q23', title: '你是否关注过国家关于"算法推荐管理"的规定？', type: 'radio', options: [
+                { text: '关注过，知道有"关闭个性化推荐"的权利', score: 0 }, { text: '听说过，但没细看', score: 1 }, { text: '完全不知道', score: 2 }, { text: '觉得那是形式主义', score: 1 }
+            ], nextDefault: 'q24' },
+            q24: { id: 'q24', title: '如果关闭个性化推荐，你担心什么？', type: 'radio', options: [
+                { text: '担心刷不到有趣的内容，全是广告', score: 3 }, { text: '担心错过重要信息', score: 2 }, { text: '觉得无所谓，甚至更清净', score: 0 }, { text: '担心账号"画像"被重置', score: 1 }
+            ], nextDefault: 'q25' },
+            q25: { id: 'q25', title: '总体而言，你觉得算法是？', type: 'radio', options: [
+                { text: '你的"赛博知己"，懂你所想', score: 3 }, { text: '一个贪婪的"流量贩子"', score: 2 }, { text: '一个有用的"信息工具"', score: 1 }, { text: '一个可怕的"数据幽灵"', score: 3 }
+            ], nextDefault: 'q26' },
+            q26: { id: 'q26', title: '你认为算法对你的生活影响程度是？', type: 'radio', options: [
+                { text: '极大，我的娱乐/消费都靠它', score: 3 }, { text: '较大，偶尔会参考它的推荐', score: 2 }, { text: '一般，我有自己的主见', score: 1 }, { text: '几乎没有影响', score: 0 }
+            ], nextDefault: 'q27' },
+            q27: { id: 'q27', title: '如果让你给算法对你的"监视"程度打分（0-10分），你会打多少？', type: 'radio', options: [
+                { text: '8-10分（像盯着我看）', score: 3 }, { text: '5-7分（能感觉到在记录）', score: 2 }, { text: '2-4分（偶尔精准）', score: 1 }, { text: '0-1分（完全没感觉）', score: 0 }
+            ], nextDefault: 'q28' },
+            q28: { id: 'q28', title: '你是否愿意为了"隐私"放弃"精准推荐"？', type: 'radio', options: [
+                { text: '愿意，已经关闭了', score: 0 }, { text: '口头上愿意，但没行动', score: 2 }, { text: '不愿意，精准推荐太爽了', score: 3 }, { text: '没想过这个问题', score: 1 }
+            ], nextDefault: 'q29' },
+            q29: { id: 'q29', title: '你认为普通人能摆脱算法的控制吗？', type: 'radio', options: [
+                { text: '不能，我们是数据的囚徒', score: 3 }, { text: '能，只要主动搜索和点击', score: 0 }, { text: '无所谓，被控制也是一种享受', score: 2 }, { text: '不知道', score: 1 }
+            ], nextDefault: 'q30' },
+            q30: { id: 'q30', title: '最后，你认为你的数据最终流向了哪里？', type: 'radio', options: [
+                { text: '广告商的数据库', score: 3 }, { text: '云端服务器', score: 1 }, { text: '被加密保护了', score: 0 }, { text: '随机消失了', score: 0 }
+            ], nextDefault: null }
+        };
+        
+        // 固定总题目最大显示（最终必须到q30）, 用于进度条估算
+        const TOTAL_QUESTIONS_COUNT = 30;
+        
+        // 全局状态
+        let currentId = 'q1';                // 当前题目ID
+        let answers = {};                    // 存储每道题得分 { q1: score, q2: score ... } 对多选存总分
+        let totalScore = 0;
+        let visitedHistory = [];              // 记录已答题顺序用于返回
+        let currentCheckboxValues = [];       // 临时多选框选中索引 (仅用于多选暂存，提交时统计)
+        
+        // DOM 元素
+        const dynamicContainer = document.getElementById('dynamicContent');
+        const nextBtn = document.getElementById('nextBtn');
+        const prevBtn = document.getElementById('prevBtn');
+        const questionCounterSpan = document.getElementById('questionCounter');
+        const progressFill = document.getElementById('progressFill');
+        const scorePreviewSpan = document.getElementById('scorePreview');
+        
+        // 辅助函数: 更新顶部总分预览 & 进度
+        function updateMeta() {
+            const answeredCount = Object.keys(answers).length;
+            let progressPercent = (answeredCount / TOTAL_QUESTIONS_COUNT) * 100;
+            progressPercent = Math.min(100, progressPercent);
+            progressFill.style.width = `${progressPercent}%`;
+            questionCounterSpan.innerText = `第 ${Math.min(answeredCount + 1, TOTAL_QUESTIONS_COUNT)} / ${TOTAL_QUESTIONS_COUNT} 题`;
+            scorePreviewSpan.innerText = `目前得分: ${totalScore}`;
+        }
+        
+        // 根据当前题目构建选项html (单选或多选)
+        function renderQuestion(q) {
+            if (!q) return '<div class="text-center text-red-500">题目加载异常</div>';
+            const isCheckbox = q.type === 'checkbox';
+            const optionsHtml = q.options.map((opt, idx) => {
+                const inputType = isCheckbox ? 'checkbox' : 'radio';
+                const nameAttr = isCheckbox ? `checkbox_${q.id}` : q.id;
+                const valueAttr = idx;
+                // 对于多选，要恢复之前临时勾选状态
+                let isChecked = false;
+                if (isCheckbox && currentCheckboxValues.includes(idx)) isChecked = true;
+                const checkedAttr = isChecked ? 'checked' : '';
+                return `
+                    <div class="flex items-start p-3 rounded-xl border border-gray-200 mb-3 hover:bg-gray-50 transition-colors cursor-pointer option-item" data-type="${inputType}" data-value="${idx}">
+                        <input type="${inputType}" name="${nameAttr}" value="${idx}" id="${q.id}_opt_${idx}" class="mt-0.5 mr-3 w-4 h-4 text-blue-800 focus:ring-blue-500" ${checkedAttr}>
+                        <label for="${q.id}_opt_${idx}" class="flex-1 text-gray-700 leading-relaxed cursor-pointer font-medium">${opt.text}</label>
+                    </div>
+                `;
+            }).join('');
+            return `
+                <div class="fade-in">
+                    <h2 class="text-xl md:text-2xl font-bold text-gray-800 mb-2 leading-tight">${q.title}</h2>
+                    ${isCheckbox ? '<p class="text-xs text-blue-600 mb-3">✔️ 可多选，勾选全部符合项</p>' : ''}
+                    <div class="mt-5 space-y-1" id="optionsContainer">
+                        ${optionsHtml}
+                    </div>
+                </div>
+            `;
+        }
+        
+        // 获取当前题目对象
+        function getCurrentQuestion() {
+            return questionsMap[currentId];
+        }
+        
+        // 清理并重新渲染
+        function refreshUI() {
+            const q = getCurrentQuestion();
+            if (!q) {
+                // 如果所有题目完成，展示结果页
+                showResultPage();
+                return;
+            }
+            // 重置临时多选存储 (如果当前是多选，从answers里尝试恢复已经存过的分数不需要，因为多选未提交前临时状态用currentCheckboxValues)
+            if (q.type === 'checkbox') {
+                // 如果该题之前已经作答过（重新编辑?）但当前逻辑不会有编辑返回时重置; 为了体验，返回编辑时恢复已选状态
+                const savedScoreKey = `checkbox_temp_${q.id}`;
+                if (answers[q.id] !== undefined && !currentCheckboxValues.length) {
+                    // 简单回显: 但难以还原具体索引，暂时清空依赖，重新从0开始，但为了友好可尝试从总分反推不精准，但用户可重选，影响不大
+                    currentCheckboxValues = [];
+                }
+            } else {
+                currentCheckboxValues = [];
+            }
+            const html = renderQuestion(q);
+            dynamicContainer.innerHTML = html;
+            // 绑定选项点击整行选中效果
+            document.querySelectorAll('.option-item').forEach(item => {
+                const input = item.querySelector('input');
+                if (!input) return;
+                item.addEventListener('click', (e) => {
+                    if (e.target.tagName !== 'INPUT') {
+                        input.click();
+                    }
+                });
+                input.addEventListener('change', (e) => {
+                    if (input.type === 'checkbox') {
+                        const val = parseInt(input.value);
+                        if (input.checked) {
+                            if (!currentCheckboxValues.includes(val)) currentCheckboxValues.push(val);
+                        } else {
+                            const idx = currentCheckboxValues.indexOf(val);
+                            if (idx !== -1) currentCheckboxValues.splice(idx, 1);
+                        }
+                    }
+                });
+            });
+            updateMeta();
+        }
+        
+        // 获取当前题目的得分 (根据选中项)
+        function getCurrentQuestionScore() {
+            const q = getCurrentQuestion();
+            if (!q) return 0;
+            if (q.type === 'checkbox') {
+                let sum = 0;
+                for (let idx of currentCheckboxValues) {
+                    if (q.options[idx]) sum += q.options[idx].score;
+                }
+                return sum;
+            } else {
+                const selectedRadio = document.querySelector(`input[name="${q.id}"]:checked`);
+                if (!selectedRadio) return null;
+                const idx = parseInt(selectedRadio.value);
+                return q.options[idx].score;
+            }
+        }
+        
+        // 获取根据当前选项分支的下一个ID (用于跳转)
+        function getNextIdByCurrentChoice() {
+            const q = getCurrentQuestion();
+            if (!q) return null;
+            // 处理带分支的情况 (q3, q6, q15)
+            if (q.hasBranch) {
+                const selectedRadio = document.querySelector(`input[name="${q.id}"]:checked`);
+                if (!selectedRadio) return null;
+                const idx = parseInt(selectedRadio.value);
+                const branchNextId = q.options[idx].nextId;
+                if (branchNextId) return branchNextId;
+            }
+            return q.nextDefault;
+        }
+        
+        // 保存当前答案，更新总分，返回下一题ID
+        function saveCurrentAndGetNext() {
+            const q = getCurrentQuestion();
+            if (!q) return null;
+            const score = getCurrentQuestionScore();
+            if (score === null) {
+                alert('请先回答当前题目~');
+                return null;
+            }
+            // 若已经存在此题得分，先减去旧分再增加新分（支持修改，但本流程无修改但安全起见）
+            if (answers[q.id] !== undefined) {
+                totalScore -= answers[q.id];
+            }
+            answers[q.id] = score;
+            totalScore += score;
+            // 处理多选额外存储已选但不需额外状态
+            // 获取下一题ID
+            let nextId = getNextIdByCurrentChoice();
+            if (!nextId) {
+                // 顺序查找
+                const ids = Object.keys(questionsMap);
+                const currentIndex = ids.indexOf(currentId);
+                if (currentIndex !== -1 && currentIndex + 1 < ids.length) nextId = ids[currentIndex+1];
+                else nextId = null;
+            }
+            return nextId;
+        }
+        
+        // 前进逻辑
+        function goNext() {
+            const q = getCurrentQuestion();
+            if (!q) {
+                showResultPage();
+                return;
+            }
+            const nextId = saveCurrentAndGetNext();
+            if (nextId === null) {
+                // 问卷结束（最后30题完成后）
+                if (currentId === 'q30') {
+                    showResultPage();
+                } else {
+                    alert("问卷尚未完整结束，请检查选项");
+                }
+                return;
+            }
+            // 记录历史
+            visitedHistory.push(currentId);
+            currentId = nextId;
+            // 重置临时多选状态
+            currentCheckboxValues = [];
+            refreshUI();
+            // 按钮显示可用
+            updatePrevBtnState();
+        }
+        
+        function goPrev() {
+            if (visitedHistory.length === 0) {
+                alert("已是第一题");
+                return;
+            }
+            // 回退需要减去当前还未保存? 但当前题目可能未保存，但通常直接返回时放弃未保存答案，回到上一题更好
+            // 更稳健: 直接从历史pop，且恢复之前的答案总分重新计算不可控，简单清掉当前未保存的变化，回到上一题并从answers恢复
+            const lastId = visitedHistory.pop();
+            // 注意: 当前显示的题目还没保存任何改动，所以丢弃未保存得分，回滚
+            currentId = lastId;
+            // 重置多选暂存
+            currentCheckboxValues = [];
+            refreshUI();
+            updatePrevBtnState();
+        }
+        
+        function updatePrevBtnState() {
+            prevBtn.disabled = visitedHistory.length === 0;
+        }
+        
+        // 结果展示 (优雅卡片)
+        function showResultPage() {
+            // 确保总分已更新所有题，如果最后一步没触发保存？goNext会在q30提交时保存，安全
+            let finalScore = totalScore;
+            let level = '', description = '', colorClass = '';
+            if (finalScore <= 20) { level = '算法“绝缘体”'; description = '你对算法有极强的抵抗力，或者使用社交媒体频率极低。你的数据几乎没有被商业化利用，你是数字世界的“隐形人”。'; colorClass = 'text-green-700 bg-green-50'; }
+            else if (finalScore <= 45) { level = '清醒的“冲浪者”'; description = '你享受算法带来的便利，但并未沉迷。你知道它在收集数据，但你掌握着主动权（如主动开关、反向训练）。你处于“被观察”但“未被控制”的状态。'; colorClass = 'text-blue-700 bg-blue-50'; }
+            else if (finalScore <= 70) { level = '算法的“提线木偶”'; description = '你的数字画像非常清晰。算法对你了如指掌，你的消费、娱乐甚至观点都深受其影响。你经常感叹“怎么又刷了一小时”，且对“麦克风窃听”深信不疑。你处于高度被监视和引导的状态。'; colorClass = 'text-orange-700 bg-orange-50'; }
+            else { level = '数据的“透明人”'; description = '你的生活与算法深度绑定。你几乎没有隐私可言，你的每一次点击都在加固你的“信息茧房”。你是算法最完美的“饲养对象”，你的需求被精准预测，你的行为被完全驯化。'; colorClass = 'text-red-700 bg-red-50'; }
+            
+            dynamicContainer.innerHTML = `
+                <div class="fade-in text-center py-4">
+                    <div class="w-20 h-20 mx-auto rounded-full bg-blue-100 flex items-center justify-center mb-4">
+                        <span class="text-3xl">🤖</span>
+                    </div>
+                    <h2 class="text-2xl font-extrabold text-gray-800">你的评测报告</h2>
+                    <div class="mt-4 p-4 rounded-2xl ${colorClass} border border-gray-200">
+                        <p class="text-3xl font-black">${finalScore} 分</p>
+                        <p class="text-xl font-bold mt-1">${level}</p>
+                        <p class="text-sm mt-3 leading-relaxed">${description}</p>
+                    </div>
+                    <div class="mt-6 text-sm text-gray-500 border-t pt-5">感谢参与评测 —— 算法时代，保持清醒即自由</div>
+                    <button id="restartBtn" class="mt-6 px-6 py-2 bg-blue-900 text-white rounded-xl hover:bg-blue-800">重新评测 ↻</button>
+                </div>
+            `;
+            document.getElementById('restartBtn')?.addEventListener('click', () => location.reload());
+            nextBtn.disabled = true;
+            prevBtn.disabled = true;
+            progressFill.style.width = '100%';
+            questionCounterSpan.innerText = `完成 · 总分 ${finalScore}`;
+        }
+        
+        // 初始化渲染 & 事件
+        function init() {
+            refreshUI();
+            nextBtn.addEventListener('click', goNext);
+            prevBtn.addEventListener('click', goPrev);
+            updatePrevBtnState();
+        }
+        
+        init();
+    </script>
+</body>
+</html>
